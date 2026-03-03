@@ -157,6 +157,8 @@ def get_admin_dashboard_context():
     ).count()
     active_sanctions = Sanction.objects.filter(status="active").values("student").distinct().count()
     completed_sanctions = Sanction.objects.filter(status="completed").count()
+    recent_activities = get_recent_activity_events()
+    recent_sanction_students = get_recent_sanction_students()
     return {
         "total_students": total_students,
         "students_change": f"+{new_students_this_week} this week",
@@ -164,7 +166,8 @@ def get_admin_dashboard_context():
         "sanctions_change": f"{active_sanctions} active record(s)",
         "completed_sanctions": completed_sanctions,
         "completed_period": "All time",
-        "recent_activities": [],
+        "recent_activities": recent_activities,
+        "recent_sanction_students": recent_sanction_students,
     }
 
 
@@ -182,6 +185,62 @@ def serialize_sanction_for_admin(sanction):
         "due_date": sanction.due_date.isoformat(),
         "progress_percent": sanction.progress_percent,
     }
+
+
+def get_recent_activity_events(limit=5):
+    events = []
+    for sanction in Sanction.objects.select_related("student").order_by("-created_at")[:3]:
+        events.append(
+            {
+                "title": "Sanction Assigned",
+                "details": f'{sanction.student.display_name} received "{sanction.violation}" ({sanction.status_label})',
+                "time": timezone.localtime(sanction.created_at).strftime("%b %d, %I:%M %p"),
+                "timestamp": sanction.created_at,
+                "timestamp_iso": sanction.created_at.isoformat(),
+                "icon": "gavel",
+            }
+        )
+    submissions = ServiceHourSubmission.objects.select_related("student").order_by("-created_at")[:3]
+    for submission in submissions:
+        events.append(
+            {
+                "title": "Service Hours Submitted",
+                "details": f"{submission.student.display_name} submitted {format_hours(submission.hours)}h ({submission.get_status_display()})",
+                "time": timezone.localtime(submission.created_at).strftime("%b %d, %I:%M %p"),
+                "timestamp": submission.created_at,
+                "timestamp_iso": submission.created_at.isoformat(),
+                "icon": "schedule",
+            }
+        )
+    concerns = Concern.objects.select_related("student").order_by("-updated_at")[:3]
+    for concern in concerns:
+        events.append(
+            {
+                "title": "Concern Update",
+                "details": f"{concern.student.display_name} - {concern.subject} ({concern.status_label})",
+                "time": timezone.localtime(concern.updated_at).strftime("%b %d, %I:%M %p"),
+                "timestamp": concern.updated_at,
+                "icon": "forum",
+            }
+        )
+    events.sort(key=lambda item: item["timestamp"], reverse=True)
+    return events[:limit]
+
+
+def get_recent_sanction_students(limit=5):
+    recent_sanctions = (
+        Sanction.objects.select_related("student")
+        .order_by("-date_issued", "-created_at")[:limit]
+    )
+    return [
+        {
+            "student_name": sanction.student.display_name,
+            "violation": sanction.violation,
+            "status_label": sanction.status_label,
+            "date": sanction.date_issued.strftime("%b %d, %Y"),
+        }
+        for sanction in recent_sanctions
+    ]
 
 
 def notify_student_of_sanction(request, sanction):
@@ -558,10 +617,21 @@ def student_management_view(request):
             student_filters |= Q(id=int(search_query))
         students = students.filter(student_filters).distinct()
 
+    total_students = students.count()
+    active_students = students.filter(is_active=True).count()
+    students_with_sanctions = (
+        Sanction.objects.filter(student__in=students)
+        .values("student")
+        .distinct()
+        .count()
+    )
     context = {
         "students": students,
         "search_query": search_query,
-        "student_count": students.count(),
+        "student_count": total_students,
+        "active_students_count": active_students,
+        "students_with_sanctions_count": students_with_sanctions,
+        "students_without_sanctions_count": total_students - students_with_sanctions,
     }
 
     return render(request, "admin/student_management.html", context)
@@ -587,7 +657,19 @@ def student_detail_view(request, student_id):
     overdue_count = 0
     sanctions = []
     for sanction in sanctions_qs:
-        overdue = sanction.status == "active" and sanction.due_date < today
+        approved_hours_qs = ServiceHourSubmission.objects.filter(
+            student=student, sanction=sanction, status="approved"
+        )
+        approved_hours = approved_hours_qs.aggregate(total=Sum("hours"))["total"] or Decimal("0")
+        completed_hours = format_hours(approved_hours)
+        progress_percentage = 0
+        if sanction.required_hours:
+            progress_percentage = min(
+                int((approved_hours / Decimal(str(sanction.required_hours))) * 100), 100
+            )
+        status_value = "completed" if progress_percentage >= 100 else "active"
+        status_label = "Completed" if status_value == "completed" else "Active"
+        overdue = status_value == "active" and sanction.due_date < today
         if overdue:
             overdue_count += 1
         sanctions.append(
@@ -595,9 +677,9 @@ def student_detail_view(request, student_id):
                 "id": sanction.id,
                 "violation": sanction.violation,
                 "required_hours": sanction.required_hours,
-                "completed_hours": sanction.completed_hours,
-                "status_label": sanction.status_label,
-                "status": sanction.status,
+                "completed_hours": completed_hours,
+                "status_label": status_label,
+                "status": status_value,
                 "date_issued": sanction.date_issued,
                 "due_date": sanction.due_date,
                 "overdue": overdue,
@@ -605,11 +687,14 @@ def student_detail_view(request, student_id):
         )
 
     has_active = sanctions_qs.filter(status="active").exists()
+    has_sanctions = sanctions_qs.exists()
     context = {
         "student": student,
         "sanctions": sanctions,
         "overdue_count": overdue_count,
         "sanction_status": "With Sanction" if has_active else "Cleared",
+        "has_sanctions": has_sanctions,
+        "has_active": has_active,
     }
     return render(request, "admin/student_detail.html", context)
 
@@ -671,22 +756,25 @@ def service_hours_management_view(request):
         messages.error(request, "You do not have permission to access this page.")
         return redirect("dashboard")
 
-    pending_qs = ServiceHourSubmission.objects.filter(status="pending").select_related("student")
-    approved_qs = ServiceHourSubmission.objects.filter(status="approved").select_related("student", "reviewed_by")
-    rejected_qs = ServiceHourSubmission.objects.filter(status="rejected")
+    pending_qs = ServiceHourSubmission.objects.filter(status__iexact="pending").select_related("student")
+    approved_qs = ServiceHourSubmission.objects.filter(status__iexact="approved").select_related(
+        "student", "reviewed_by"
+    )
+    rejected_qs = ServiceHourSubmission.objects.filter(status__iexact="rejected")
 
     pending_submissions = pending_qs.count()
     approved_submissions = approved_qs.count()
     rejected_submissions = rejected_qs.count()
     active_students = (
-        ServiceHourSubmission.objects.filter(status="pending").values("student").distinct().count()
+        ServiceHourSubmission.objects.filter(status__iexact="pending").values("student").distinct().count()
     )
     pending_hours = pending_qs.aggregate(total=Sum("hours"))["total"] or Decimal("0")
     approved_hours = approved_qs.aggregate(total=Sum("hours"))["total"] or Decimal("0")
     total_reviewed = approved_submissions + rejected_submissions
     completion_rate = int((approved_submissions / total_reviewed) * 100) if total_reviewed else 0
 
-    pending_submissions_list = [
+    all_submissions_qs = ServiceHourSubmission.objects.select_related("student").order_by("-date", "-created_at")
+    service_submissions = [
         {
             "id": submission.id,
             "student_name": submission.student.display_name,
@@ -695,9 +783,10 @@ def service_hours_management_view(request):
             "hours": format_hours(submission.hours),
             "description": submission.description,
             "status": submission.status,
+            "status_label": submission.get_status_display(),
             "proof_url": submission.proof.url if submission.proof else "",
         }
-        for submission in pending_qs.order_by("-date", "-created_at")
+        for submission in all_submissions_qs
     ]
     recently_validated_list = [
         {
@@ -719,8 +808,8 @@ def service_hours_management_view(request):
         "pending_hours_total": format_hours(pending_hours),
         "approved_hours_total": format_hours(approved_hours),
         "completion_rate": completion_rate,
-        "pending_submissions": pending_submissions_list,
         "recently_validated_submissions": recently_validated_list,
+        "service_submissions": service_submissions,
     }
     return render(request, "admin/servicehours_management.html", context)
 
@@ -929,17 +1018,57 @@ def student_sanctions_view(request):
 
     sanctions = []
     for sanction in Sanction.objects.filter(student=request.user):
+        due_status = ""
+        due_status_class = ""
+        today = timezone.localdate()
+        if sanction.due_date < today:
+            due_status = "Overdue"
+            due_status_class = "overdue"
+        elif sanction.due_date == today:
+            due_status = "Due Today"
+            due_status_class = "due-today"
+        approved_submissions_qs = ServiceHourSubmission.objects.filter(
+            student=request.user, sanction=sanction, status="approved"
+        ).order_by("reviewed_at", "updated_at", "created_at")
+        approved_hours = approved_submissions_qs.aggregate(total=Sum("hours"))["total"] or Decimal("0")
+        completion_time = None
+        should_display = True
+        if sanction.required_hours and approved_hours >= Decimal(str(sanction.required_hours)):
+            cumulative = Decimal("0")
+            for entry in approved_submissions_qs:
+                hours = Decimal(str(entry.hours))
+                cumulative += hours
+                timestamp = entry.reviewed_at or entry.updated_at or entry.created_at
+                if cumulative >= Decimal(str(sanction.required_hours)):
+                    completion_time = timestamp or timezone.now()
+                    break
+            cutoff = completion_time + timezone.timedelta(hours=24) if completion_time else None
+            if cutoff and timezone.now() >= cutoff:
+                should_display = False
+        progress_percentage = 0
+        if sanction.required_hours:
+            progress_percentage = min(
+                int((approved_hours / Decimal(str(sanction.required_hours))) * 100), 100
+            )
+        completed_hours = format_hours(approved_hours)
+        status_label = "Completed" if progress_percentage >= 100 else sanction.status_label
+        status_class = "status-completed" if progress_percentage >= 100 else "status-active"
+        if not should_display:
+            continue
         sanctions.append(
             {
                 "id": sanction.id,
                 "title": sanction.violation,
                 "issued": sanction.date_issued.isoformat(),
-                "status_label": sanction.status_label,
-                "completed_hours": sanction.completed_hours,
+                "status_label": status_label,
+                "completed_hours": completed_hours,
                 "required_hours": sanction.required_hours,
                 "note": sanction.note,
-                "progress_percentage": sanction.progress_percent,
-                "status_class": "status-completed" if sanction.status == "completed" else "status-active",
+                "progress_percentage": progress_percentage,
+                "status_class": status_class,
+                "due_status": due_status,
+                "due_status_class": due_status_class,
+                "due_date": sanction.due_date,
             }
         )
 
@@ -975,8 +1104,7 @@ def student_service_hours_view(request):
             if not description:
                 raise ValueError("Description is required.")
             proof_file = request.FILES.get("proof")
-
-            ServiceHourSubmission.objects.create(
+            submission = ServiceHourSubmission.objects.create(
                 student=request.user,
                 sanction=sanction,
                 date=submission_date,
@@ -984,6 +1112,9 @@ def student_service_hours_view(request):
                 description=description,
                 proof=proof_file,
             )
+            if not proof_file:
+                submission.delete()
+                raise ValueError("Proof of completion is required.")
             messages.success(request, "Service hours submitted successfully. Awaiting validation.")
         except ValueError as exc:
             messages.error(request, str(exc))
@@ -1014,7 +1145,21 @@ def student_service_hours_view(request):
         for entry in submissions_qs
     ]
 
-    sanction_options = [{"id": sanction.id, "title": sanction.violation} for sanction in sanctions_qs]
+    # Only offer sanctions that are still active (not fully completed)
+    active_sanctions = []
+    for sanction in sanctions_qs:
+        approved_hours = (
+            ServiceHourSubmission.objects.filter(
+                student=request.user, sanction=sanction, status="approved"
+            ).aggregate(total=Sum("hours"))["total"]
+            or Decimal("0")
+        )
+        if sanction.required_hours and approved_hours >= Decimal(str(sanction.required_hours)):
+            continue
+        if sanction.status == "completed":
+            continue
+        active_sanctions.append(sanction)
+    sanction_options = [{"id": sanction.id, "title": sanction.violation} for sanction in active_sanctions]
 
     context = {
         "student_name": request.user.display_name,
@@ -1051,6 +1196,7 @@ def student_records_view(request):
             "date": entry.date.isoformat(),
             "hours": format_hours(entry.hours),
             "description": entry.description,
+            "sanction_title": entry.sanction.violation if entry.sanction else "Unspecified",
         }
         for entry in ServiceHourSubmission.objects.filter(student=request.user, status="approved")
     ]
@@ -1144,7 +1290,7 @@ def reports_management_view(request):
         messages.error(request, "You do not have permission to access this page.")
         return redirect("dashboard")
 
-    month_slots = recent_month_slots(6)
+    month_slots = recent_month_slots(12)
     month_labels = [datetime(year, month, 1).strftime("%b") for year, month in month_slots]
 
     student_departments = set(

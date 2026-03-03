@@ -1,0 +1,10 @@
+Areas to Improve
+
+Stop shipping a hard-coded key/DEBUG flag. settings.py (lines 15-24) currently sets SECRET_KEY, DEBUG=True, and keeps ALLOWED_HOSTS empty, which is fine for local dev but can leak credentials and leave the site wide open if that file ever hits production. Read those values from environment variables and ensure DEBUG is switched off before deployment, together with an explicit, appropriate ALLOWED_HOSTS list.
+The admin dashboard is an empty “Recent Activity” card because get_admin_dashboard_context always returns recent_activities: [] (views.py (lines 153-167)) and the template at admin_dashboard.html (lines 441-462) only knows how to render items from that list. Build a small event feed (e.g., last sanctions created/updated, service-submission approvals, or LogEntry records) and pass it into recent_activities so the card is populated instead of showing the placeholder text. Likewise, the custom admin index (index.html (lines 61-70) and admin.py (lines 27-45)) only renders static navigation tiles; you could reuse the same contextual counts (total students, active sanctions, pending submissions) to give admins a dashboard-style summary before they click through.
+Coverage focuses solely on login and page access (tests.py (lines 7-35)), so none of the core workflows—creating sanctions, logging service hours, sending notification emails, changing concern statuses—have regression protection. Add targeted tests for those views/serializers (especially the sanction creation/emails and service-hour approvals) so the visible UI and the “Recent Activity” feed have a safety net.
+Next steps:
+
+Externalize secret info + tighten DEBUG/ALLOWED_HOSTS, then verify against your deployment checklist.
+Implement a recent_activities query (e.g., latest 5 Sanction updates and service status changes) and surface it in both dashboard templates.
+Expand test coverage around the admin workflows that power those dashboard tiles so future tweaks don’t break the “Recent Activity” feed you are trying to show.
