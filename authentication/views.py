@@ -334,6 +334,7 @@ def add_sanction_view(request):
             date_issued = parse_iso_date(request.POST.get("date_issued"), "Date issued")
             due_date = parse_iso_date(request.POST.get("due_date"), "Due date")
             department = (request.POST.get("department") or "").strip()
+            note = (request.POST.get("note") or "").strip()
 
             violation_text = sanction_type.description if sanction_type else sanction_type_description
             if not violation_text:
@@ -345,6 +346,7 @@ def add_sanction_view(request):
                 violation_snapshot=violation_text,
                 department=department,
                 required_hours=required_hours,
+                note=note,
                 date_issued=date_issued,
                 due_date=due_date,
             )
@@ -463,6 +465,7 @@ def add_new_student_with_sanction_view(request):
             course_year = (request.POST.get("course_year") or "").strip()
             department = (request.POST.get("new_student_department") or "").strip()
             violation = (request.POST.get("new_violation") or "").strip()
+            note = (request.POST.get("new_note") or "").strip()
             sanction_type = SanctionType.objects.filter(description__iexact=violation).first()
             default_hours = sanction_type.hours if sanction_type else None
             required_hours = parse_non_negative_int(
@@ -509,6 +512,7 @@ def add_new_student_with_sanction_view(request):
                 violation_snapshot=violation or (sanction_type.description if sanction_type else "Unspecified"),
                 department=department,
                 required_hours=required_hours,
+                note=note,
                 date_issued=date_issued,
                 due_date=due_date,
             )
@@ -516,10 +520,13 @@ def add_new_student_with_sanction_view(request):
             violation_label = violation or (sanction_type.description if sanction_type else "Unspecified")
             subject = "Sanction Tracker — Access details"
             from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@sanctiontracker.local")
+
             sanction_summary = (
                 f"{violation_label} · Required hours: {required_hours} · "
                 f"Issued: {date_issued.isoformat()} · Due: {due_date.isoformat()}"
             )
+            if note:
+                sanction_summary += f" · Description: {note}"
             login_url = request.build_absolute_uri(reverse("login"))
             body = (
                 f"Hello {student.display_name},\n\n"
@@ -1393,22 +1400,10 @@ def reports_management_view(request):
             continue
         reports_data[option["key"]] = build_report_config(option["label"])
 
-    report_concerns = [
-        {
-            "student_name": concern.student.display_name,
-            "subject": concern.subject,
-            "date_submitted": concern.created_at.date().isoformat(),
-            "status_class": concern.status_class,
-            "status_label": concern.status_label,
-        }
-        for concern in Concern.objects.select_related("student").all()[:10]
-    ]
-
     context = {
         "department_options": department_options,
         "reports_data": reports_data,
         "report_month_labels": month_labels,
-        "report_concerns": report_concerns,
     }
     return render(request, "admin/reports_management.html", context)
 

@@ -33,7 +33,10 @@
             </div>
         </div>
         {% if sanction.note %}
-        <p class="sanction-note">{{ sanction.note }}</p>
+        <div class="sanction-description">
+            <strong>Description</strong>
+            <p>{{ sanction.note }}</p>
+        </div>
         {% endif %}
     </article>
     {% empty %}

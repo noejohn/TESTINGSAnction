@@ -271,59 +271,58 @@
         <div class="footer">
             <p>Â© 2024 Sanction Tracker System. All rights reserved.</p>
         </div>
-    </div>
+        </div>
 
-    <div class="modal-overlay validate" id="validate-modal">
-        <div class="validate-card">
-            <button type="button" class="close-modal" aria-label="Close validate modal">&times;</button>
-            <div class="validate-grid">
-                <div class="validate-info">
-                    <h3>Validate Submission</h3>
-                    <p>Review the details and use the AI tool to confirm the authenticity of the submitted proof.</p>
-                    <div class="validate-details">
-                        <div><span>Student:</span> <span id="modal-student-name"></span></div>
-                        <div><span>Date:</span> <span id="modal-submission-date"></span></div>
-                        <div><span>Hours:</span> <span id="modal-hours-value"></span> hours</div>
-                        <div><span>Description:</span> <span id="modal-description-text"></span></div>
+        <div class="modal-overlay validate" id="validate-modal">
+            <div class="validate-card">
+                <div class="validate-grid">
+                    <div class="validate-info">
+                        <h3>Validate Submission</h3>
+                        <p>Review the details and use the AI tool to confirm the authenticity of the submitted proof.</p>
+                        <div class="validate-details">
+                            <div><span>Student:</span> <span id="modal-student-name"></span></div>
+                            <div><span>Date:</span> <span id="modal-submission-date"></span></div>
+                            <div><span>Hours:</span> <span id="modal-hours-value"></span> hours</div>
+                            <div><span>Description:</span> <span id="modal-description-text"></span></div>
+                        </div>
+                        <div class="proof-preview">
+                            <img id="modal-proof-image" src="https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=800&q=80" alt="Submission proof">
+                        </div>
                     </div>
-                    <div class="proof-preview">
-                        <img id="modal-proof-image" src="https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=800&q=80" alt="Submission proof">
+                    <div class="validate-ai">
+                        <h4>AI Verification</h4>
+                        <p class="validate-ai-description">Use the AI tool to determine whether the proof is genuine or sourced from elsewhere.</p>
+                        <button type="button" class="ai-verify-btn" id="ai-verify-btn">
+                            <i class="material-icons" style="font-size:16px;">auto_fix_high</i>
+                            Verify with AI
+                        </button>
                     </div>
                 </div>
-                <div class="validate-ai">
-                    <h4>AI Verification</h4>
-                    <p class="validate-ai-description">Use the AI tool to determine whether the proof is genuine or sourced from elsewhere.</p>
-                    <button type="button" class="ai-verify-btn" id="ai-verify-btn">
-                        <i class="material-icons" style="font-size:16px;">auto_fix_high</i>
-                        Verify with AI
-                    </button>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-cancel" id="modal-cancel">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="reject-btn">Reject</button>
+                    <button type="button" class="btn btn-approve" id="approve-btn">Approve</button>
                 </div>
             </div>
-            <div class="modal-actions">
-                <button type="button" class="btn btn-cancel" id="modal-cancel">Cancel</button>
-                <button type="button" class="btn btn-danger" id="reject-btn">Reject</button>
-                <button type="button" class="btn btn-approve" id="approve-btn">Approve</button>
-            </div>
         </div>
-    </div>
 
-    <div class="modal-overlay" id="view-modal">
-        <div class="modal-card">
-            <button type="button" class="close-modal" aria-label="Close view modal" onclick="closeViewModal()">&times;</button>
-            <h3>Submission Details</h3>
-            <div class="validate-details">
-                <div><span>Student:</span> <span id="view-student-name"></span></div>
-                <div><span>Student ID:</span> <span id="view-student-id"></span></div>
-                <div><span>Date:</span> <span id="view-date"></span></div>
-                <div><span>Hours:</span> <span id="view-hours"></span></div>
-                <div><span>Description:</span> <span id="view-description"></span></div>
-            </div>
-            <div class="proof-preview">
-                <img id="view-proof" alt="Submission proof" />
-                <span id="view-proof-empty" style="display:none; color: var(--gray);">No proof provided.</span>
+        <div class="modal-overlay" id="view-modal">
+            <div class="modal-card">
+                <button type="button" class="close-modal" aria-label="Close view modal" onclick="closeViewModal()">&times;</button>
+                <h3>Submission Details</h3>
+                <div class="validate-details">
+                    <div><span>Student:</span> <span id="view-student-name"></span></div>
+                    <div><span>Student ID:</span> <span id="view-student-id"></span></div>
+                    <div><span>Date:</span> <span id="view-date"></span></div>
+                    <div><span>Hours:</span> <span id="view-hours"></span></div>
+                    <div><span>Description:</span> <span id="view-description"></span></div>
+                </div>
+                <div class="proof-preview">
+                    <img id="view-proof" alt="Submission proof" />
+                    <span id="view-proof-empty" style="display:none; color: var(--gray);">No proof provided.</span>
+                </div>
             </div>
         </div>
-    </div>
 
     <script>
         // Validate individual hours

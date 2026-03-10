@@ -176,6 +176,10 @@
                                     </select>
                                 </div>
                             </div>
+                            <div class="form-group">
+                                <label class="form-label" for="existing-note">Description</label>
+                                <textarea id="existing-note" name="note" rows="3" placeholder="Describe this sanction for the student..."></textarea>
+                            </div>
                             <div class="form-grid-three">
                                 <div>
                                     <label class="form-label" for="existing-date-issued">Date Issued</label>
@@ -187,7 +191,7 @@
                                 </div>
                                 <div>
                                     <label class="form-label" for="existing-hours">Required Hours</label>
-                                    <input type="number" id="existing-hours" name="required_hours" placeholder="Auto-filled" readonly>
+                                    <input type="number" id="existing-hours" name="required_hours" min="1" placeholder="Enter required hours">
                                 </div>
                             </div>
                             <div class="form-actions">
@@ -253,8 +257,12 @@
                                 </div>
                                 <div>
                                     <label class="form-label" for="new-hours">Required Hours</label>
-                                    <input type="number" id="new-hours" name="new_required_hours" placeholder="Auto-filled" readonly>
+                                    <input type="number" id="new-hours" name="new_required_hours" min="1" placeholder="Enter required hours">
                                 </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="new-note">Description</label>
+                                <textarea id="new-note" name="new_note" rows="3" placeholder="Describe this sanction for the student..."></textarea>
                             </div>
                             <div class="form-grid-two">
                                 <div>
@@ -471,20 +479,6 @@
             if (button) button.classList.add('active');
         }
 
-        function bindRequiredHours(selectId, targetId) {
-            const select = document.getElementById(selectId);
-            const target = document.getElementById(targetId);
-            if (!select || !target) return;
-
-            const updateHours = () => {
-                const selected = select.selectedOptions[0];
-                target.value = selected?.dataset.hours || '';
-            };
-
-            select.addEventListener('change', updateHours);
-            updateHours();
-        }
-
         function initStudentSearch() {
             const searchInput = document.getElementById('existing-student-search');
             const studentSelect = document.getElementById('existing-student');
@@ -598,8 +592,6 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            bindRequiredHours('existing-violation', 'existing-hours');
-            bindRequiredHours('new-violation', 'new-hours');
             initStudentSearch();
             initExistingStudentAutoDepartment();
             initLogoutHandler();

@@ -217,43 +217,6 @@
                     </div>
                     <p class="note" id="reports-note">Please select a specific department to generate the email.</p>
                 </div>
-                <div class="concerns-card">
-                    <h3>Student Concerns</h3>
-                    <p>Review and address concerns filed by students.</p>
-                    <table class="concern-table">
-                        <thead>
-                            <tr>
-                                <th>Student Name</th>
-                                <th>Subject</th>
-                                <th>Date Submitted</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for concern in report_concerns %}
-                            <tr>
-                                <td>{{ concern.student_name }}</td>
-                                <td>{{ concern.subject }}</td>
-                                <td>{{ concern.date_submitted }}</td>
-                                <td><span class="status-pill status-{{ concern.status_class }}">{{ concern.status_label }}</span></td>
-                                <td class="concern-actions">
-                                    <button type="button" onclick="viewConcern('{{ concern.student_name|escapejs }}')">
-                                        <i class="material-icons">visibility</i>
-                                        View
-                                    </button>
-                                </td>
-                            </tr>
-                            {% empty %}
-                            <tr>
-                                <td colspan="5" style="text-align: center; padding: 18px; color: var(--gray);">
-                                    No concerns found.
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
             </div>
         </div>
 
@@ -501,11 +464,39 @@ Sanction Tracker Office`;
         }
 
         function printChart() {
-            alert('Printing the Sanctions by Month chart...');
+            if (!sanctionsChart || !chartCanvas) {
+                return;
+            }
+            const imageUrl = chartCanvas.toDataURL('image/png');
+            const printWindow = window.open('', '_blank', 'width=900,height=700');
+            if (!printWindow) {
+                alert('Pop-up blocked. Please enable pop-ups to print the chart.');
+                return;
+            }
+            printWindow.document.write('<html><head><title>Sanctions by Month</title></head><body style="margin:0">');
+            printWindow.document.write(
+                `<img src="${imageUrl}" style="width:100%; display:block;" alt="Sanctions chart">`
+            );
+            printWindow.document.write('</body></html>');
+            printWindow.document.close();
+            printWindow.focus();
+            printWindow.onload = () => {
+                printWindow.print();
+            };
         }
 
         function exportChart() {
-            alert('Exporting chart data...');
+            if (!chartCanvas) {
+                return;
+            }
+            const downloadLink = document.createElement('a');
+            const filename = `sanctions-chart-${new Date().toISOString().slice(0, 10)}.png`;
+            downloadLink.download = filename;
+            downloadLink.href = chartCanvas.toDataURL('image/png');
+            downloadLink.style.display = 'none';
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
         }
 
         function viewAllStudents() {
@@ -516,28 +507,150 @@ Sanction Tracker Office`;
             alert(`Opening concern record for ${studentName}.`);
         }
 
+        function getCurrentReportConfig() {
+            const key = departmentSelect?.value || 'all';
+            return reportsData[key] || reportsData.all;
+        }
+
+        function sanitizeText(value) {
+            return (value ?? '').toString();
+        }
+
+        function openPrintableWindow(title, contentHtml, autoPrint = true) {
+            const printWindow = window.open('', '_blank', 'width=900,height=700');
+            if (!printWindow) {
+                alert('Pop-up blocked. Please enable pop-ups to print or export.');
+                return null;
+            }
+            const style = `
+                body { font-family: 'Inter', system-ui, sans-serif; margin: 0; padding: 32px; background: #f9f7ff; color: #1f1b3a; }
+                h1 { margin-bottom: 12px; font-size: 28px; }
+                h2 { margin-top: 24px; font-size: 18px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+                th, td { padding: 10px 12px; border-bottom: 1px solid rgba(15, 23, 42, 0.15); text-align: left; }
+                .muted { color: rgba(17, 24, 39, 0.6); margin-top: 0; }
+                ul { padding-left: 20px; margin: 0; }
+            `;
+            printWindow.document.write(`<!DOCTYPE html><html><head><title>${title}</title><style>${style}</style></head><body>${contentHtml}</body></html>`);
+            printWindow.document.close();
+            printWindow.focus();
+            if (autoPrint) {
+                printWindow.onload = () => {
+                    printWindow.print();
+                };
+            }
+            return printWindow;
+        }
+
+        function buildSummaryTable(summary) {
+            const rows = [
+                ['Required Hours', sanitizeText(summary.required)],
+                ['Completed Hours', sanitizeText(summary.completed)],
+                ['Remaining Hours', sanitizeText(summary.remaining)],
+                ['Completion', `${sanitizeText(summary.completion)}%`],
+            ];
+            return `
+                <table>
+                    <tbody>
+                        ${rows
+                            .map(
+                                ([label, value]) => `
+                                    <tr>
+                                        <th>${label}</th>
+                                        <td>${value}</td>
+                                    </tr>
+                                `
+                            )
+                            .join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function buildTopStudentsSection(topStudents) {
+            if (!topStudents?.length) {
+                return `<p class="muted">No students have completed service hours during this period.</p>`;
+            }
+            return `
+                <h2>Top Students by Service Hours</h2>
+                <ul>
+                    ${topStudents
+                        .map(
+                            student => `<li>${sanitizeText(student.name)} — ${sanitizeText(student.hours)} hrs</li>`
+                        )
+                        .join('')}
+                </ul>
+            `;
+        }
+
         function printSanctionReport() {
-            const key = departmentSelect.value;
-            const label = reportsData[key]?.label || 'the selected department';
-            alert(`Printing sanction report for ${label}.`);
+            const config = getCurrentReportConfig();
+            const content = `
+                <h1>Student Sanction Records — ${config.label}</h1>
+                <p class="muted">Sanction summary generated from the live dashboard data.</p>
+                ${buildSummaryTable(config.summary || {})}
+                ${buildTopStudentsSection(config.topStudents || [])}
+            `;
+            openPrintableWindow(`Sanction Report — ${config.label}`, content);
         }
 
         function downloadPDF() {
-            const key = departmentSelect.value;
-            const label = reportsData[key]?.label || 'the selected department';
-            alert(`Downloading PDF report for ${label}.`);
+            const config = getCurrentReportConfig();
+            const content = `
+                <h1>Student Sanction Records — ${config.label}</h1>
+                <p class="muted">After the print dialog opens, select “Save as PDF” to download this report.</p>
+                ${buildSummaryTable(config.summary || {})}
+                ${buildTopStudentsSection(config.topStudents || [])}
+            `;
+            const printWindow = openPrintableWindow(`Sanction Report PDF — ${config.label}`, content);
+            if (printWindow) {
+                printWindow.onload = () => {
+                    printWindow.print();
+                };
+            }
         }
 
         function printSummary() {
-            const key = departmentSelect.value;
-            const label = reportsData[key]?.label || 'the selected department';
-            alert(`Printing community service hour summary for ${label}.`);
+            const config = getCurrentReportConfig();
+            const content = `
+                <h1>Community Service Hour Summary — ${config.label}</h1>
+                <p class="muted">Overview of approved, required, and remaining service hours.</p>
+                ${buildSummaryTable(config.summary || {})}
+            `;
+            openPrintableWindow(`Service Summary — ${config.label}`, content);
         }
 
         function downloadCSV() {
-            const key = departmentSelect.value;
-            const label = reportsData[key]?.label || 'the selected department';
-            alert(`Downloading community service hour summary for ${label}.`);
+            const config = getCurrentReportConfig();
+            const summary = config.summary || {};
+            const topStudents = config.topStudents || [];
+            const metaRows = [
+                ['Department', config.label],
+                ['Required Hours', sanitizeText(summary.required)],
+                ['Completed Hours', sanitizeText(summary.completed)],
+                ['Remaining Hours', sanitizeText(summary.remaining)],
+                ['Completion %', sanitizeText(summary.completion)],
+            ];
+            const csvLines = metaRows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(','));
+            if (topStudents.length) {
+                csvLines.push('');
+                csvLines.push('"Top Student","Hours"');
+                topStudents.forEach(student => {
+                    csvLines.push(
+                        `"${sanitizeText(student.name).replace(/"/g, '""')}","${sanitizeText(student.hours)}"`
+                    );
+                });
+            }
+            const csvContent = csvLines.join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `service-hours-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         }
 
         if (monthFilter) {
