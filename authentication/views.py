@@ -270,6 +270,34 @@ def notify_student_of_sanction(request, sanction):
         return False
 
 
+def warn_student_due_today(request, sanction, remaining_hours_display):
+    """Send a reminder email when a sanction is due today."""
+    if not sanction or not sanction.student or not sanction.student.email:
+        return False
+    login_url = request.build_absolute_uri(reverse("student_service_hours"))
+    subject = f'Sanction Tracker — Reminder: "{sanction.violation}" is due today'
+    due_date_display = sanction.due_date.strftime("%B %d, %Y")
+    body = (
+        f"Hello {sanction.student.display_name},\n\n"
+        f"Your sanction for \"{sanction.violation}\" is due today ({due_date_display}).\n"
+        f"You still need {remaining_hours_display} hour(s) before the sanction can be marked complete.\n\n"
+        "Please submit your remaining service hours proof before the end of the day. Overdue sanctions automatically "
+        "add one extra hour for each day the requirement is missed.\n\n"
+        f"Log in to your account: {login_url}\n\n"
+        "If you believe this is an error, contact student affairs immediately.\n"
+        "Best regards,\n"
+        "Student Affairs"
+    )
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@sanctiontracker.local")
+    try:
+        send_mail(subject, body, from_email, [sanction.student.email])
+        sanction.record_due_warning_sent()
+        return True
+    except Exception:
+        logger.exception("Failed to send due-today reminder to %s", sanction.student.email)
+        return False
+
+
 @login_required
 def sanction_management_view(request):
     if not has_admin_access(request.user):
@@ -1024,29 +1052,40 @@ def student_sanctions_view(request):
         return redirect("admin_dashboard" if has_admin_access(request.user) else "login")
 
     sanctions = []
+    today = timezone.localdate()
     for sanction in Sanction.objects.filter(student=request.user):
         due_status = ""
         due_status_class = ""
-        today = timezone.localdate()
+        approved_submissions_qs = ServiceHourSubmission.objects.filter(
+            student=request.user, sanction=sanction, status="approved"
+        ).order_by("reviewed_at", "updated_at", "created_at")
+        approved_hours = approved_submissions_qs.aggregate(total=Sum("hours"))["total"] or Decimal("0")
+        required_hours_decimal = Decimal(sanction.required_hours)
+        needs_extension = (
+            required_hours_decimal > Decimal("0")
+            and approved_hours < required_hours_decimal
+            and sanction.due_date < today
+        )
+        if needs_extension and sanction.apply_overdue_extension(today=today):
+            required_hours_decimal = Decimal(sanction.required_hours)
         if sanction.due_date < today:
             due_status = "Overdue"
             due_status_class = "overdue"
         elif sanction.due_date == today:
             due_status = "Due Today"
             due_status_class = "due-today"
-        approved_submissions_qs = ServiceHourSubmission.objects.filter(
-            student=request.user, sanction=sanction, status="approved"
-        ).order_by("reviewed_at", "updated_at", "created_at")
-        approved_hours = approved_submissions_qs.aggregate(total=Sum("hours"))["total"] or Decimal("0")
+            remaining_hours = max(required_hours_decimal - approved_hours, Decimal("0"))
+            if remaining_hours > Decimal("0") and not sanction.due_warning_sent_today(today):
+                warn_student_due_today(request, sanction, format_hours(remaining_hours))
         completion_time = None
         should_display = True
-        if sanction.required_hours and approved_hours >= Decimal(str(sanction.required_hours)):
+        if sanction.required_hours and approved_hours >= required_hours_decimal:
             cumulative = Decimal("0")
             for entry in approved_submissions_qs:
                 hours = Decimal(str(entry.hours))
                 cumulative += hours
                 timestamp = entry.reviewed_at or entry.updated_at or entry.created_at
-                if cumulative >= Decimal(str(sanction.required_hours)):
+                if cumulative >= required_hours_decimal:
                     completion_time = timestamp or timezone.now()
                     break
             cutoff = completion_time + timezone.timedelta(hours=24) if completion_time else None
@@ -1055,7 +1094,7 @@ def student_sanctions_view(request):
         progress_percentage = 0
         if sanction.required_hours:
             progress_percentage = min(
-                int((approved_hours / Decimal(str(sanction.required_hours))) * 100), 100
+                int((approved_hours / required_hours_decimal) * 100), 100
             )
         completed_hours = format_hours(approved_hours)
         status_label = "Completed" if progress_percentage >= 100 else sanction.status_label

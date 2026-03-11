@@ -91,11 +91,14 @@ class SanctionAdmin(admin.ModelAdmin):
         'status',
         'date_issued',
         'due_date',
+        'due_warning_sent_at',
+        'last_overdue_extension_date',
     )
     list_filter = ('status', 'department', 'date_issued', 'due_date')
     search_fields = ('student__username', 'student__first_name', 'student__last_name', 'violation_snapshot')
     autocomplete_fields = ('student', 'sanction_type')
     ordering = ('-date_issued', '-created_at')
+    readonly_fields = ('due_warning_sent_at', 'last_overdue_extension_date')
 
 
 @admin.register(ServiceHourSubmission)

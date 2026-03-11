@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.db import models
+from django.utils import timezone
 
 
 class CustomUserManager(UserManager):
@@ -111,6 +112,8 @@ class Sanction(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     date_issued = models.DateField()
     due_date = models.DateField()
+    due_warning_sent_at = models.DateTimeField(null=True, blank=True)
+    last_overdue_extension_date = models.DateField(null=True, blank=True)
     note = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -158,6 +161,38 @@ class Sanction(models.Model):
         if not self.required_hours:
             return 0
         return min(int((self.completed_hours / self.required_hours) * 100), 100)
+
+    def due_warning_sent_today(self, today=None):
+        if not self.due_warning_sent_at:
+            return False
+        today = today or timezone.localdate()
+        try:
+            last_sent = timezone.localtime(self.due_warning_sent_at).date()
+        except Exception:
+            return False
+        return last_sent == today
+
+    def record_due_warning_sent(self):
+        self.due_warning_sent_at = timezone.now()
+        self.save(update_fields=["due_warning_sent_at"])
+
+    def should_extend_overdue(self, today=None):
+        today = today or timezone.localdate()
+        if self.due_date >= today:
+            return False
+        last_extended = self.last_overdue_extension_date
+        if last_extended and last_extended >= today:
+            return False
+        return True
+
+    def apply_overdue_extension(self, today=None):
+        today = today or timezone.localdate()
+        if not self.should_extend_overdue(today):
+            return False
+        self.required_hours += 1
+        self.last_overdue_extension_date = today
+        self.save(update_fields=["required_hours", "last_overdue_extension_date"])
+        return True
 
 
 class ServiceHourSubmission(models.Model):
